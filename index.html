@@ -6,15 +6,9 @@
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<meta name="apple-mobile-web-app-capable" content="yes">
-
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
-
-<title>Dungeoned Out</title>
-
 <style>
 
-body { margin:0; background:black; overflow:hidden; }
+body { margin:0; overflow:hidden; background:#000; }
 
 canvas { display:block; }
 
@@ -28,12 +22,6 @@ canvas { display:block; }
 
 <script>
 
-// ==== GAME STATE ====
-
-let gameState = "menu";
-
-// ==== CANVAS ====
-
 const canvas = document.getElementById("game");
 
 const ctx = canvas.getContext("2d");
@@ -42,429 +30,327 @@ canvas.width = innerWidth;
 
 canvas.height = innerHeight;
 
-// ==== SOUND ====
+// === PLAYER ===
 
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let player = {
 
-function beep(f,d){let o=audioCtx.createOscillator(),g=audioCtx.createGain();
+ x: innerWidth/2,
 
-o.connect(g);g.connect(audioCtx.destination);
+ y: innerHeight/2,
 
-o.frequency.value=f;o.start();
+ targetX: innerWidth/2,
 
-g.gain.setValueAtTime(0.2,audioCtx.currentTime);
+ targetY: innerHeight/2,
 
-g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
+ speed: 3,
 
-o.stop(audioCtx.currentTime+d);}
+ hp: 100,
 
-// ==== VARIABLES ====
+ maxHp: 100
 
-let shake=0, room=1, enemies=[], fireballs=[], loot=[], inventory=[];
+};
 
-let xp=0, lvl=1, xpNext=5, choosing=false, options=[];
+// === SYSTEMS ===
 
-let cooldown=0;
+let enemies = [];
 
-// ==== PLAYER ====
+let hitEffects = [];
 
-let player;
+let animTime = 0;
 
-// ==== UPGRADES ====
+// === COMBAT ===
 
-let up;
+let attackRange = 60;
 
-// ==== SPELLS ====
+let attackCooldown = 0;
 
-let spells;
+let attackSpeed = 30;
 
-let spellCD;
+let playerDamage = 5;
 
-// ==== SAVE ====
+// === SCREEN SHAKE ===
 
-function saveGame(){
+let shake = 0;
 
- localStorage.setItem("save", JSON.stringify({player,up,spells,lvl,xp,xpNext,room,inventory}));
+function triggerShake(i){ shake = i; }
 
-}
+// === UTILS ===
 
-function loadGame(){
+function dist(a,b){
 
- let d = JSON.parse(localStorage.getItem("save"));
-
- if(!d) return false;
-
- player=d.player; up=d.up; spells=d.spells;
-
- lvl=d.lvl; xp=d.xp; xpNext=d.xpNext; room=d.room;
-
- inventory=d.inventory||[];
-
- return true;
+ return Math.hypot(a.x-b.x, a.y-b.y);
 
 }
 
-// ==== RESET ====
-
-function resetGame(){
-
- room=1; xp=0; lvl=1; xpNext=5;
-
- enemies=[]; fireballs=[]; loot=[]; inventory=[];
-
- player={x:innerWidth/2,y:innerHeight/2,hp:100,maxHp:100,speed:3,targetX:null,targetY:null};
-
- up={dmg:25,cd:30,speed:3,maxHp:100};
-
- spells={ice:false,light:false};
-
- spellCD={ice:0,light:0};
-
- start();
-
-}
-
-// ==== ENEMIES ====
+// === ENEMY ===
 
 function enemy(){
 
- let r=Math.random();
+ return {
 
- if(r<0.5) return {t:"b",x:Math.random()*innerWidth,y:Math.random()*innerHeight,s:20,spd:1.5,h:40+Math.pow(room,1.2)*4};
+  x: Math.random()*innerWidth,
 
- if(r<0.8) return {t:"f",x:Math.random()*innerWidth,y:Math.random()*innerHeight,s:16,spd:3,h:20+room*3};
+  y: Math.random()*innerHeight,
 
- return {t:"t",x:Math.random()*innerWidth,y:Math.random()*innerHeight,s:26,spd:.8,h:80+room*10};
+  h: 30,
 
-}
+  spd: 1.5
 
-function boss(){
-
- return {t:"boss",x:innerWidth/2,y:120,s:50,spd:1.2,h:250+Math.pow(room,1.3)*10};
+ };
 
 }
 
-function start(){
+function spawnEnemies(){
 
- enemies=[];
+ enemies = [];
 
- if(room%5===0) enemies.push(boss());
-
- else for(let i=0;i<room+2;i++) enemies.push(enemy());
+ for(let i=0;i<6;i++) enemies.push(enemy());
 
 }
 
-// ==== LEVEL UP ====
+spawnEnemies();
 
-function levelUp(){
+// === INPUT ===
 
- lvl++; xp=0; xpNext+=4+Math.floor(lvl*.5); choosing=true;
+canvas.addEventListener("touchstart", e=>{
 
- options=[
+ let t = e.touches[0];
 
-  {t:"🔥 DMG",a:()=>up.dmg+=10},
+ player.targetX = t.clientX;
 
-  {t:"❄️ CD",a:()=>up.cd=Math.max(10,up.cd-5)},
-
-  {t:"❤️ HP",a:()=>{up.maxHp+=20;player.hp+=20}},
-
-  {t:"💨 SPD",a:()=>up.speed+=.5},
-
-  {t:"⚡ Lightning",a:()=>spells.light=true},
-
-  {t:"🧊 Ice",a:()=>spells.ice=true}
-
- ].sort(()=>.5-Math.random()).slice(0,3);
-
-}
-
-// ==== INPUT ====
-
-canvas.addEventListener("touchstart",e=>{
-
- let t=e.touches[0];
-
- // MENU
-
- if(gameState==="menu"){
-
-  if(t.clientY>innerHeight/2 && t.clientY<innerHeight/2+50){
-
-   localStorage.removeItem("save");
-
-   resetGame();
-
-   gameState="playing";
-
-  }
-
-  if(t.clientY>innerHeight/2+60 && t.clientY<innerHeight/2+110){
-
-   if(loadGame()){ start(); gameState="playing"; }
-
-  }
-
-  return;
-
- }
-
- // UPGRADES
-
- if(choosing){
-
-  options.forEach((o,i)=>{
-
-   let y=innerHeight/2+i*50;
-
-   if(t.clientY>y&&t.clientY<y+40){o.a();choosing=false;saveGame();}
-
-  });
-
-  return;
-
- }
-
- let hit=enemies.find(en=>Math.hypot(t.clientX-en.x,t.clientY-en.y)<en.s);
-
- if(hit){
-
-  hit.h-=40+(lvl*2); beep(600,.1); shake=10;
-
- }else{
-
-  if(cooldown<=0){
-
-   let dx=t.clientX-player.x,dy=t.clientY-player.y,d=Math.hypot(dx,dy);
-
-   fireballs.push({x:player.x,y:player.y,vx:dx/d*6,vy:dy/d*6});
-
-   cooldown=up.cd; beep(300,.1);
-
-  }
-
-  player.targetX=t.clientX; player.targetY=t.clientY;
-
- }
-
- if(e.touches.length===2 && spells.ice && spellCD.ice<=0){
-
-  enemies.forEach(en=>{
-
-   if(Math.hypot(player.x-en.x,player.y-en.y)<120){
-
-    en.h-=20; en.slow=.5;
-
-   }
-
-  });
-
-  spellCD.ice=120; beep(500,.2);
-
- }
+ player.targetY = t.clientY;
 
 });
 
-// ==== UPDATE ====
+// === LIGHT ===
+
+function drawLight(x,y,r,color){
+
+ let g = ctx.createRadialGradient(x,y,0,x,y,r);
+
+ g.addColorStop(0,color);
+
+ g.addColorStop(1,"transparent");
+
+ ctx.fillStyle=g;
+
+ ctx.beginPath();
+
+ ctx.arc(x,y,r,0,Math.PI*2);
+
+ ctx.fill();
+
+}
+
+// === UPDATE ===
 
 function update(){
 
- if(gameState!=="playing"||choosing) return;
+ animTime += 0.05;
 
- player.speed=up.speed;
+ // MOVEMENT (smooth)
 
- if(player.targetX){
+ player.x += (player.targetX - player.x) * 0.1;
 
-  let dx=player.targetX-player.x,dy=player.targetY-player.y,d=Math.hypot(dx,dy);
+ player.y += (player.targetY - player.y) * 0.1;
 
-  if(d>5){player.x+=dx/d*player.speed;player.y+=dy/d*player.speed;}
-
- }
+ // ENEMY FOLLOW
 
  enemies.forEach(en=>{
 
-  let dx=player.x-en.x,dy=player.y-en.y,d=Math.hypot(dx,dy);
+  let dx = player.x - en.x;
 
-  let slow=en.slow||1;
+  let dy = player.y - en.y;
 
-  en.x+=dx/d*en.spd*slow;
+  let d = Math.hypot(dx,dy);
 
-  en.y+=dy/d*en.spd*slow;
+  en.x += dx/d * en.spd;
 
-  if(en.slow) en.slow+=(1-en.slow)*.05;
+  en.y += dy/d * en.spd;
 
-  if(d<en.s+10){
+  if(d < 20){
 
-   player.hp -= en.t==="boss"?0.6:0.15;
+   player.hp -= 0.1;
 
-   shake=6;
+   triggerShake(2);
 
   }
 
  });
 
- fireballs.forEach(f=>{
+ // AUTO ATTACK
 
-  f.x+=f.vx; f.y+=f.vy;
+ attackCooldown--;
+
+ if(attackCooldown <= 0){
+
+  let nearest = null;
 
   enemies.forEach(en=>{
 
-   if(Math.hypot(f.x-en.x,f.y-en.y)<en.s){
+   if(!nearest || dist(player,en) < dist(player,nearest)){
 
-    en.h-=up.dmg*.8; f.hit=true; beep(800,.05); shake=8;
+    nearest = en;
 
    }
 
   });
 
- });
+  if(nearest && dist(player,nearest) < attackRange){
 
- fireballs=fireballs.filter(f=>!f.hit);
+   nearest.h -= playerDamage;
 
- if(spells.light && spellCD.light<=0){
+   hitEffects.push({
 
-  let n=enemies[0];
+    x: nearest.x,
 
-  if(n){n.h-=40; spellCD.light=100; beep(1000,.05);}
+    y: nearest.y,
+
+    life: 10
+
+   });
+
+   attackCooldown = attackSpeed;
+
+   triggerShake(3);
+
+  }
 
  }
 
- enemies=enemies.filter(en=>{
+ // REMOVE DEAD
 
-  if(en.h<=0){
+ enemies = enemies.filter(en=> en.h > 0);
 
-   xp++; beep(200,.1);
+ // RESPAWN
 
-   if(Math.random()<.4) loot.push({x:en.x,y:en.y,t:["dmg","hp","spd"][Math.floor(Math.random()*3)]});
+ if(enemies.length === 0){
 
-   if(xp>=xpNext) levelUp();
+  spawnEnemies();
 
-   return false;
+ }
 
-  }
+ // HIT EFFECT UPDATE
 
-  return true;
+ hitEffects.forEach(e=>{
 
- });
+  e.y -= 0.5;
 
- loot.forEach(l=>{
-
-  if(Math.hypot(player.x-l.x,player.y-l.y)<20){
-
-   if(l.t==="dmg") up.dmg+=3;
-
-   if(l.t==="hp"){up.maxHp+=6;player.hp+=6;}
-
-   if(l.t==="spd") up.speed+=.1;
-
-   inventory.push(l); l.gone=true;
-
-  }
+  e.life--;
 
  });
 
- loot=loot.filter(l=>!l.gone);
-
- if(enemies.length===0){room++;start();saveGame();}
-
- if(cooldown>0) cooldown--;
-
- for(let k in spellCD) if(spellCD[k]>0) spellCD[k]--;
-
- if(shake>0) shake--;
+ hitEffects = hitEffects.filter(e=>e.life>0);
 
 }
 
-// ==== DRAW ====
+// === DRAW ===
 
 function draw(){
 
- if(gameState==="menu"){
+ ctx.save();
 
-  ctx.fillStyle="black";
+ // SHAKE
 
-  ctx.fillRect(0,0,innerWidth,innerHeight);
+ if(shake > 0){
 
-  ctx.fillStyle="white";
+  ctx.translate(
 
-  ctx.font="30px Arial";
+   (Math.random()-0.5)*shake,
 
-  ctx.fillText("DUNGEONED OUT",innerWidth/2-130,innerHeight/2-100);
+   (Math.random()-0.5)*shake
 
-  ctx.font="20px Arial";
+  );
 
-  ctx.fillText("▶️ Start New Run",innerWidth/2-100,innerHeight/2);
-
-  ctx.fillText("🔁 Continue",innerWidth/2-100,innerHeight/2+60);
-
-  return;
+  shake *= 0.9;
 
  }
 
- let ox=(Math.random()-.5)*shake, oy=(Math.random()-.5)*shake;
+ // BACKGROUND
 
- ctx.save(); ctx.translate(ox,oy);
+ ctx.fillStyle="#0e0e11";
 
- ctx.fillStyle="#111"; ctx.fillRect(0,0,innerWidth,innerHeight);
+ ctx.fillRect(0,0,innerWidth,innerHeight);
 
- ctx.fillStyle="purple";
+ // LIGHT
 
- ctx.fillRect(player.x-10,player.y-10,20,20);
+ drawLight(player.x,player.y,80,"rgba(255,255,255,0.15)");
+
+ // PLAYER
+
+ let bob = Math.sin(animTime*4)*2;
+
+ ctx.fillStyle="#7c4dff";
+
+ ctx.beginPath();
+
+ ctx.arc(player.x, player.y + bob, 10, 0, Math.PI*2);
+
+ ctx.fill();
+
+ // ENEMIES
 
  enemies.forEach(en=>{
 
-  ctx.fillStyle=en.t==="f"?"yellow":en.t==="t"?"blue":en.t==="boss"?"white":"red";
+  ctx.fillStyle="#ff5252";
 
-  ctx.fillRect(en.x-en.s/2,en.y-en.s/2,en.s,en.s);
+  ctx.beginPath();
+
+  ctx.arc(en.x,en.y,8,0,Math.PI*2);
+
+  ctx.fill();
 
  });
 
- ctx.fillStyle="orange";
+ // HIT FX
 
- fireballs.forEach(f=>{ctx.beginPath();ctx.arc(f.x,f.y,6,0,6.28);ctx.fill();});
+ hitEffects.forEach(e=>{
 
- ctx.fillStyle="lime";
+  ctx.globalAlpha = e.life/10;
 
- loot.forEach(l=>ctx.fillRect(l.x-4,l.y-4,8,8));
+  ctx.fillStyle="#ffd700";
+
+  ctx.beginPath();
+
+  ctx.arc(e.x,e.y,10,0,Math.PI*2);
+
+  ctx.fill();
+
+ });
+
+ ctx.globalAlpha = 1;
+
+ // TARGET INDICATOR
+
+ ctx.fillStyle="rgba(255,255,255,0.2)";
+
+ ctx.beginPath();
+
+ ctx.arc(player.targetX, player.targetY, 8, 0, Math.PI*2);
+
+ ctx.fill();
+
+ // UI
+
+ ctx.fillStyle="#fff";
+
+ ctx.fillText("HP: " + Math.floor(player.hp), 20, 30);
 
  ctx.restore();
 
- ctx.fillStyle="white";
-
- ctx.fillText("HP:"+Math.floor(player.hp),20,30);
-
- ctx.fillText("Room:"+room,20,60);
-
- ctx.fillText("Lvl:"+lvl,20,90);
-
- ctx.fillStyle="red";
-
- ctx.fillRect(20,110,100,10);
-
- ctx.fillStyle="green";
-
- ctx.fillRect(20,110,(player.hp/player.maxHp)*100,10);
-
- if(choosing){
-
-  ctx.fillStyle="black"; ctx.fillRect(0,0,innerWidth,innerHeight);
-
-  ctx.fillStyle="white";
-
-  options.forEach((o,i)=>ctx.fillText(o.t,innerWidth/2-100,innerHeight/2+i*50));
-
- }
-
- if(player.hp<=0){
-
-  ctx.fillText("GAME OVER - TAP",innerWidth/2-100,innerHeight/2);
-
- }
-
 }
 
-// ==== LOOP ====
+// === LOOP ===
 
-function loop(){update();draw();requestAnimationFrame(loop);}
+function loop(){
+
+ update();
+
+ draw();
+
+ requestAnimationFrame(loop);
+
+}
 
 loop();
 
