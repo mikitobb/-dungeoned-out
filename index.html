@@ -30,13 +30,13 @@ canvas.width = innerWidth;
 
 canvas.height = innerHeight;
 
-// === CORE STATE ===
+// ===== CORE =====
 
 let animTime = 0;
 
 let shake = 0;
 
-// === PLAYER ===
+// ===== PLAYER =====
 
 let player = {
 
@@ -62,7 +62,7 @@ let player = {
 
 };
 
-// === SYSTEMS ===
+// ===== SYSTEMS =====
 
 let enemies = [];
 
@@ -70,7 +70,11 @@ let effects = [];
 
 let abilities = [];
 
-// === COMBAT ===
+let loot = [];
+
+let playerEffects = [];
+
+// ===== COMBAT =====
 
 let attackCooldown = 0;
 
@@ -78,133 +82,171 @@ let attackSpeed = 25;
 
 let damage = 6;
 
-// === ABILITY ===
+// ===== ABILITY =====
 
 let abilityCooldown = 0;
 
 let abilityMax = 80;
 
-// === UTILS ===
+// ===== ULTIMATE =====
 
-function dist(a,b){
+let ultimateCharge = 0;
 
- return Math.hypot(a.x-b.x, a.y-b.y);
+let ultimateReady = false;
 
-}
+// ===== WAVES =====
 
-function triggerShake(i){ shake = i; }
+let wave = 1;
 
-// === ENEMY ===
+let inWave = true;
+
+// ===== UTILS =====
+
+function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+
+function triggerShake(i){ shake=i; }
+
+// ===== ENEMY TYPES =====
 
 function enemy(){
 
- return {
+ let types=["normal","tank","fast","ranged"];
 
-  x: Math.random()*innerWidth,
+ let type=types[Math.floor(Math.random()*types.length)];
 
-  y: Math.random()*innerHeight,
+ let e={
 
-  h: 20 + player.level * 5,
+  x:Math.random()*innerWidth,
 
-  spd: 1.2 + player.level*0.05
+  y:Math.random()*innerHeight,
+
+  type,
+
+  h:20+wave*5,
+
+  spd:1.5
 
  };
+
+ if(type==="tank"){ e.h=60; e.spd=0.7; }
+
+ if(type==="fast"){ e.h=15; e.spd=2.5; }
+
+ if(type==="ranged"){ e.cooldown=60; }
+
+ return e;
 
 }
 
 function spawnEnemies(){
 
- for(let i=0;i<4 + player.level;i++){
+ enemies=[];
 
-  enemies.push(enemy());
-
- }
+ for(let i=0;i<4+wave;i++) enemies.push(enemy());
 
 }
 
-// === INPUT ===
+// ===== LOOT =====
+
+function generateLoot(){
+
+ let r=Math.random();
+
+ let rarity="common";
+
+ if(r>0.9) rarity="legendary";
+
+ else if(r>0.7) rarity="epic";
+
+ else if(r>0.4) rarity="rare";
+
+ return {
+
+  x:0,y:0,rarity,
+
+  dmg:Math.random()*3,
+
+  effect: rarity==="legendary"
+
+   ? ["explode","lifesteal","chain"][Math.floor(Math.random()*3)]
+
+   : null
+
+ };
+
+}
+
+// ===== INPUT =====
 
 canvas.addEventListener("touchstart", e=>{
 
- let t = e.touches[0];
+ let t=e.touches[0];
 
- if(e.touches.length > 1 && abilityCooldown <= 0){
+ if(e.touches.length>2 && ultimateReady){
 
-  abilities.push({
+  enemies.forEach(en=> en.h-=50);
 
-   x: player.x,
+  ultimateCharge=0;
 
-   y: player.y,
+  ultimateReady=false;
 
-   r: 10,
+  return;
 
-   life: 20
+ }
 
-  });
+ if(e.touches.length>1 && abilityCooldown<=0){
 
-  abilityCooldown = abilityMax;
+  abilities.push({x:player.x,y:player.y,r:10,life:20});
+
+  abilityCooldown=abilityMax;
 
  } else {
 
-  player.targetX = t.clientX;
+  player.targetX=t.clientX;
 
-  player.targetY = t.clientY;
+  player.targetY=t.clientY;
 
  }
 
 });
 
-// === LIGHT ===
-
-function light(x,y,r,c){
-
- let g = ctx.createRadialGradient(x,y,0,x,y,r);
-
- g.addColorStop(0,c);
-
- g.addColorStop(1,"transparent");
-
- ctx.fillStyle=g;
-
- ctx.beginPath();
-
- ctx.arc(x,y,r,0,Math.PI*2);
-
- ctx.fill();
-
-}
-
-// === UPDATE ===
+// ===== UPDATE =====
 
 function update(){
 
- animTime += 0.05;
+ animTime+=0.05;
 
- // MOVE
+ player.x+=(player.targetX-player.x)*0.1;
 
- player.x += (player.targetX - player.x)*0.1;
+ player.y+=(player.targetY-player.y)*0.1;
 
- player.y += (player.targetY - player.y)*0.1;
-
- // ENEMY AI
+ // ENEMIES
 
  enemies.forEach(en=>{
 
-  let dx = player.x - en.x;
+  let dx=player.x-en.x;
 
-  let dy = player.y - en.y;
+  let dy=player.y-en.y;
 
-  let d = Math.hypot(dx,dy);
+  let d=Math.hypot(dx,dy);
 
-  en.x += dx/d * en.spd;
+  en.x+=dx/d*en.spd;
 
-  en.y += dy/d * en.spd;
+  en.y+=dy/d*en.spd;
 
-  if(d < 20){
+  if(d<20){ player.hp-=0.2; triggerShake(2); }
 
-   player.hp -= 0.2;
+  if(en.type==="ranged"){
 
-   triggerShake(2);
+   en.cooldown--;
+
+   if(d<200 && en.cooldown<=0){
+
+    player.hp-=5;
+
+    en.cooldown=60;
+
+   }
 
   }
 
@@ -214,29 +256,39 @@ function update(){
 
  attackCooldown--;
 
- if(attackCooldown <= 0){
+ if(attackCooldown<=0){
 
-  let nearest = enemies[0];
+  let nearest=enemies[0];
 
   enemies.forEach(en=>{
 
-   if(dist(player,en) < dist(player,nearest)){
-
-    nearest = en;
-
-   }
+   if(dist(player,en)<dist(player,nearest)) nearest=en;
 
   });
 
-  if(nearest && dist(player,nearest) < 60){
+  if(nearest && dist(player,nearest)<60){
 
-   nearest.h -= damage;
+   nearest.h-=damage;
 
-   effects.push({x:nearest.x,y:nearest.y,life:10});
+   ultimateCharge+=1;
 
-   attackCooldown = attackSpeed;
+   if(playerEffects.includes("explode")){
 
-   triggerShake(3);
+    enemies.forEach(e=>{
+
+     if(dist(e,nearest)<50) e.h-=5;
+
+    });
+
+   }
+
+   if(playerEffects.includes("lifesteal")){
+
+    player.hp+=0.5;
+
+   }
+
+   attackCooldown=attackSpeed;
 
   }
 
@@ -248,15 +300,23 @@ function update(){
 
  abilities.forEach(a=>{
 
-  a.r += 4;
-
-  a.life--;
+  a.r+=4; a.life--;
 
   enemies.forEach(en=>{
 
-   if(dist(a,en) < a.r){
+   if(dist(a,en)<a.r){
 
-    en.h -= 15;
+    en.h-=15;
+
+    if(playerEffects.includes("chain")){
+
+     enemies.forEach(o=>{
+
+      if(o!==en && dist(o,en)<60) o.h-=5;
+
+     });
+
+    }
 
    }
 
@@ -264,15 +324,25 @@ function update(){
 
  });
 
- abilities = abilities.filter(a=>a.life>0);
+ abilities=abilities.filter(a=>a.life>0);
 
- // REMOVE DEAD
+ // LOOT DROP
 
- enemies = enemies.filter(en=>{
+ enemies=enemies.filter(en=>{
 
-  if(en.h <= 0){
+  if(en.h<=0){
 
-   player.xp += 5;
+   player.xp+=5;
+
+   if(Math.random()<0.6){
+
+    let item=generateLoot();
+
+    item.x=en.x; item.y=en.y;
+
+    loot.push(item);
+
+   }
 
    return false;
 
@@ -282,45 +352,53 @@ function update(){
 
  });
 
- // LEVEL UP
+ // PICKUP
 
- if(player.xp >= player.xpNext){
+ loot.forEach(l=>{
 
-  player.xp = 0;
+  if(dist(player,l)<20){
+
+   damage+=l.dmg;
+
+   if(l.effect) playerEffects.push(l.effect);
+
+   l.picked=true;
+
+  }
+
+ });
+
+ loot=loot.filter(l=>!l.picked);
+
+ // LEVEL
+
+ if(player.xp>=player.xpNext){
+
+  player.xp=0;
 
   player.level++;
 
-  player.xpNext += 20;
+  player.xpNext+=20;
 
-  player.maxHp += 10;
-
-  damage += 2;
+  player.maxHp+=10;
 
  }
 
- // RESPAWN
+ // WAVE
 
- if(enemies.length === 0){
+ if(enemies.length===0){
+
+  wave++;
 
   spawnEnemies();
 
  }
 
- // EFFECTS
-
- effects.forEach(e=>{
-
-  e.life--;
-
-  e.y -= 0.5;
-
- });
-
- effects = effects.filter(e=>e.life>0);
+ if(ultimateCharge>=100) ultimateReady=true;
 
 }
 
-// === DRAW ===
+// ===== DRAW =====
 
 function draw(){
 
@@ -328,35 +406,37 @@ function draw(){
 
  if(shake>0){
 
-  ctx.translate(
+  ctx.translate((Math.random()-0.5)*shake,(Math.random()-0.5)*shake);
 
-   (Math.random()-0.5)*shake,
-
-   (Math.random()-0.5)*shake
-
-  );
-
-  shake *= 0.9;
+  shake*=0.9;
 
  }
-
- // BG
 
  ctx.fillStyle="#0e0e11";
 
  ctx.fillRect(0,0,innerWidth,innerHeight);
 
- light(player.x,player.y,80,"rgba(255,255,255,0.15)");
-
- let bob = Math.sin(animTime*4)*2;
-
  // PLAYER
 
- ctx.fillStyle="#7c4dff";
+ let bob=Math.sin(animTime*4)*2;
+
+ ctx.fillStyle="rgba(0,0,0,0.3)";
 
  ctx.beginPath();
 
- ctx.arc(player.x, player.y+bob, 10, 0, Math.PI*2);
+ ctx.ellipse(player.x,player.y+14,12,5,0,0,Math.PI*2);
+
+ ctx.fill();
+
+ ctx.fillStyle="#7c4dff";
+
+ ctx.fillRect(player.x-6,player.y-6+bob,12,12);
+
+ ctx.fillStyle="#f1c27d";
+
+ ctx.beginPath();
+
+ ctx.arc(player.x,player.y-12+bob,6,0,Math.PI*2);
 
  ctx.fill();
 
@@ -364,7 +444,15 @@ function draw(){
 
  enemies.forEach(en=>{
 
-  ctx.fillStyle="#ff5252";
+  let c="#ff5252";
+
+  if(en.type==="tank") c="#8d6e63";
+
+  if(en.type==="fast") c="#00e5ff";
+
+  if(en.type==="ranged") c="#ffd740";
+
+  ctx.fillStyle=c;
 
   ctx.beginPath();
 
@@ -378,9 +466,9 @@ function draw(){
 
  abilities.forEach(a=>{
 
-  ctx.globalAlpha = a.life/20;
+  ctx.globalAlpha=a.life/20;
 
-  let g = ctx.createRadialGradient(a.x,a.y,0,a.x,a.y,a.r);
+  let g=ctx.createRadialGradient(a.x,a.y,0,a.x,a.y,a.r);
 
   g.addColorStop(0,"#7c4dff");
 
@@ -396,25 +484,17 @@ function draw(){
 
  });
 
- ctx.globalAlpha = 1;
+ ctx.globalAlpha=1;
 
- // HIT FX
+ // LOOT
 
- effects.forEach(e=>{
+ loot.forEach(l=>{
 
-  ctx.globalAlpha = e.life/10;
+  ctx.fillStyle=l.rarity==="legendary"?"#ffd700":"#aaa";
 
-  ctx.fillStyle="#ffd700";
-
-  ctx.beginPath();
-
-  ctx.arc(e.x,e.y,10,0,Math.PI*2);
-
-  ctx.fill();
+  ctx.fillRect(l.x-3,l.y-3,6,6);
 
  });
-
- ctx.globalAlpha = 1;
 
  // UI
 
@@ -424,21 +504,19 @@ function draw(){
 
  ctx.fillText("LVL: "+player.level,20,50);
 
- // XP BAR
+ ctx.fillText("Wave: "+wave,20,70);
 
- ctx.fillStyle="#333";
+ ctx.fillRect(innerWidth-120,20,100,10);
 
- ctx.fillRect(20,60,100,6);
+ ctx.fillStyle="#ff5252";
 
- ctx.fillStyle="#7c4dff";
-
- ctx.fillRect(20,60,100*(player.xp/player.xpNext),6);
+ ctx.fillRect(innerWidth-120,20,ultimateCharge,10);
 
  ctx.restore();
 
 }
 
-// === LOOP ===
+// ===== LOOP =====
 
 function loop(){
 
