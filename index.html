@@ -30,6 +30,12 @@ canvas.width = innerWidth;
 
 canvas.height = innerHeight;
 
+// === CORE STATE ===
+
+let animTime = 0;
+
+let shake = 0;
+
 // === PLAYER ===
 
 let player = {
@@ -46,7 +52,13 @@ let player = {
 
  hp: 100,
 
- maxHp: 100
+ maxHp: 100,
+
+ level: 1,
+
+ xp: 0,
+
+ xpNext: 20
 
 };
 
@@ -54,25 +66,23 @@ let player = {
 
 let enemies = [];
 
-let hitEffects = [];
+let effects = [];
 
-let animTime = 0;
+let abilities = [];
 
 // === COMBAT ===
 
-let attackRange = 60;
-
 let attackCooldown = 0;
 
-let attackSpeed = 30;
+let attackSpeed = 25;
 
-let playerDamage = 5;
+let damage = 6;
 
-// === SCREEN SHAKE ===
+// === ABILITY ===
 
-let shake = 0;
+let abilityCooldown = 0;
 
-function triggerShake(i){ shake = i; }
+let abilityMax = 80;
 
 // === UTILS ===
 
@@ -81,6 +91,8 @@ function dist(a,b){
  return Math.hypot(a.x-b.x, a.y-b.y);
 
 }
+
+function triggerShake(i){ shake = i; }
 
 // === ENEMY ===
 
@@ -92,9 +104,9 @@ function enemy(){
 
   y: Math.random()*innerHeight,
 
-  h: 30,
+  h: 20 + player.level * 5,
 
-  spd: 1.5
+  spd: 1.2 + player.level*0.05
 
  };
 
@@ -102,13 +114,13 @@ function enemy(){
 
 function spawnEnemies(){
 
- enemies = [];
+ for(let i=0;i<4 + player.level;i++){
 
- for(let i=0;i<6;i++) enemies.push(enemy());
+  enemies.push(enemy());
+
+ }
 
 }
-
-spawnEnemies();
 
 // === INPUT ===
 
@@ -116,19 +128,39 @@ canvas.addEventListener("touchstart", e=>{
 
  let t = e.touches[0];
 
- player.targetX = t.clientX;
+ if(e.touches.length > 1 && abilityCooldown <= 0){
 
- player.targetY = t.clientY;
+  abilities.push({
+
+   x: player.x,
+
+   y: player.y,
+
+   r: 10,
+
+   life: 20
+
+  });
+
+  abilityCooldown = abilityMax;
+
+ } else {
+
+  player.targetX = t.clientX;
+
+  player.targetY = t.clientY;
+
+ }
 
 });
 
 // === LIGHT ===
 
-function drawLight(x,y,r,color){
+function light(x,y,r,c){
 
  let g = ctx.createRadialGradient(x,y,0,x,y,r);
 
- g.addColorStop(0,color);
+ g.addColorStop(0,c);
 
  g.addColorStop(1,"transparent");
 
@@ -148,13 +180,13 @@ function update(){
 
  animTime += 0.05;
 
- // MOVEMENT (smooth)
+ // MOVE
 
- player.x += (player.targetX - player.x) * 0.1;
+ player.x += (player.targetX - player.x)*0.1;
 
- player.y += (player.targetY - player.y) * 0.1;
+ player.y += (player.targetY - player.y)*0.1;
 
- // ENEMY FOLLOW
+ // ENEMY AI
 
  enemies.forEach(en=>{
 
@@ -170,7 +202,7 @@ function update(){
 
   if(d < 20){
 
-   player.hp -= 0.1;
+   player.hp -= 0.2;
 
    triggerShake(2);
 
@@ -184,11 +216,11 @@ function update(){
 
  if(attackCooldown <= 0){
 
-  let nearest = null;
+  let nearest = enemies[0];
 
   enemies.forEach(en=>{
 
-   if(!nearest || dist(player,en) < dist(player,nearest)){
+   if(dist(player,en) < dist(player,nearest)){
 
     nearest = en;
 
@@ -196,19 +228,11 @@ function update(){
 
   });
 
-  if(nearest && dist(player,nearest) < attackRange){
+  if(nearest && dist(player,nearest) < 60){
 
-   nearest.h -= playerDamage;
+   nearest.h -= damage;
 
-   hitEffects.push({
-
-    x: nearest.x,
-
-    y: nearest.y,
-
-    life: 10
-
-   });
+   effects.push({x:nearest.x,y:nearest.y,life:10});
 
    attackCooldown = attackSpeed;
 
@@ -218,9 +242,61 @@ function update(){
 
  }
 
+ // ABILITY
+
+ abilityCooldown--;
+
+ abilities.forEach(a=>{
+
+  a.r += 4;
+
+  a.life--;
+
+  enemies.forEach(en=>{
+
+   if(dist(a,en) < a.r){
+
+    en.h -= 15;
+
+   }
+
+  });
+
+ });
+
+ abilities = abilities.filter(a=>a.life>0);
+
  // REMOVE DEAD
 
- enemies = enemies.filter(en=> en.h > 0);
+ enemies = enemies.filter(en=>{
+
+  if(en.h <= 0){
+
+   player.xp += 5;
+
+   return false;
+
+  }
+
+  return true;
+
+ });
+
+ // LEVEL UP
+
+ if(player.xp >= player.xpNext){
+
+  player.xp = 0;
+
+  player.level++;
+
+  player.xpNext += 20;
+
+  player.maxHp += 10;
+
+  damage += 2;
+
+ }
 
  // RESPAWN
 
@@ -230,17 +306,17 @@ function update(){
 
  }
 
- // HIT EFFECT UPDATE
+ // EFFECTS
 
- hitEffects.forEach(e=>{
-
-  e.y -= 0.5;
+ effects.forEach(e=>{
 
   e.life--;
 
+  e.y -= 0.5;
+
  });
 
- hitEffects = hitEffects.filter(e=>e.life>0);
+ effects = effects.filter(e=>e.life>0);
 
 }
 
@@ -250,9 +326,7 @@ function draw(){
 
  ctx.save();
 
- // SHAKE
-
- if(shake > 0){
+ if(shake>0){
 
   ctx.translate(
 
@@ -266,25 +340,23 @@ function draw(){
 
  }
 
- // BACKGROUND
+ // BG
 
  ctx.fillStyle="#0e0e11";
 
  ctx.fillRect(0,0,innerWidth,innerHeight);
 
- // LIGHT
-
- drawLight(player.x,player.y,80,"rgba(255,255,255,0.15)");
-
- // PLAYER
+ light(player.x,player.y,80,"rgba(255,255,255,0.15)");
 
  let bob = Math.sin(animTime*4)*2;
+
+ // PLAYER
 
  ctx.fillStyle="#7c4dff";
 
  ctx.beginPath();
 
- ctx.arc(player.x, player.y + bob, 10, 0, Math.PI*2);
+ ctx.arc(player.x, player.y+bob, 10, 0, Math.PI*2);
 
  ctx.fill();
 
@@ -302,9 +374,33 @@ function draw(){
 
  });
 
+ // ABILITY
+
+ abilities.forEach(a=>{
+
+  ctx.globalAlpha = a.life/20;
+
+  let g = ctx.createRadialGradient(a.x,a.y,0,a.x,a.y,a.r);
+
+  g.addColorStop(0,"#7c4dff");
+
+  g.addColorStop(1,"transparent");
+
+  ctx.fillStyle=g;
+
+  ctx.beginPath();
+
+  ctx.arc(a.x,a.y,a.r,0,Math.PI*2);
+
+  ctx.fill();
+
+ });
+
+ ctx.globalAlpha = 1;
+
  // HIT FX
 
- hitEffects.forEach(e=>{
+ effects.forEach(e=>{
 
   ctx.globalAlpha = e.life/10;
 
@@ -320,21 +416,23 @@ function draw(){
 
  ctx.globalAlpha = 1;
 
- // TARGET INDICATOR
-
- ctx.fillStyle="rgba(255,255,255,0.2)";
-
- ctx.beginPath();
-
- ctx.arc(player.targetX, player.targetY, 8, 0, Math.PI*2);
-
- ctx.fill();
-
  // UI
 
  ctx.fillStyle="#fff";
 
- ctx.fillText("HP: " + Math.floor(player.hp), 20, 30);
+ ctx.fillText("HP: "+Math.floor(player.hp),20,30);
+
+ ctx.fillText("LVL: "+player.level,20,50);
+
+ // XP BAR
+
+ ctx.fillStyle="#333";
+
+ ctx.fillRect(20,60,100,6);
+
+ ctx.fillStyle="#7c4dff";
+
+ ctx.fillRect(20,60,100*(player.xp/player.xpNext),6);
 
  ctx.restore();
 
@@ -351,6 +449,8 @@ function loop(){
  requestAnimationFrame(loop);
 
 }
+
+spawnEnemies();
 
 loop();
 
